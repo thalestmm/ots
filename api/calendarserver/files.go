@@ -2,7 +2,7 @@
 //
 // This file is part of OTS.
 
-package server
+package calendarserver
 
 import (
 	"fmt"
@@ -15,16 +15,6 @@ import (
 )
 
 // postStampFile godoc
-// @Summary      Stamp a file
-// @Description  Multipart upload (field "file"). The file is hashed server-side with SHA-256 and submitted to upstream calendars. Returns a standard detached .ots proof as bytes.
-// @Tags         files
-// @Accept       multipart/form-data
-// @Produce      application/octet-stream
-// @Param        file  formData  file  true  "File to timestamp"
-// @Success      200  {string}  string  "Detached .ots proof bytes"
-// @Failure      400  {object}  ErrorResponse
-// @Failure      502  {object}  ErrorResponse
-// @Router       /api/v1/stamp-file [post]
 func (h *Handler) postStampFile(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
 	file, header, err := r.FormFile("file")
@@ -39,9 +29,9 @@ func (h *Handler) postStampFile(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("hash file: %v", err))
 		return
 	}
-	proof, err := h.backend.Stamp(r.Context(), det.FileDigest())
+	proof, err := h.aggregator.Submit(r.Context(), det.FileDigest())
 	if err != nil {
-		writeJSONError(w, http.StatusBadGateway, err.Error())
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if err := det.Timestamp.Merge(proof); err != nil {
@@ -65,16 +55,6 @@ func (h *Handler) postStampFile(w http.ResponseWriter, r *http.Request) {
 }
 
 // postVerifyFile godoc
-// @Summary      Verify a file against its .ots proof
-// @Description  Multipart upload: field "file" (original content) and field "ots" (detached proof). Returns the full verification result.
-// @Tags         files
-// @Accept       multipart/form-data
-// @Produce      json
-// @Param        file  formData  file  true  "Original file"
-// @Param        ots   formData  file  true  "Detached .ots proof"
-// @Success      200  {object}  VerifyResponse
-// @Failure      400  {object}  ErrorResponse
-// @Router       /api/v1/verify-file [post]
 func (h *Handler) postVerifyFile(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
 	file, _, err := r.FormFile("file")

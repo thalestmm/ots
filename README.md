@@ -1,41 +1,39 @@
 # OTS
 
-OpenTimestamps calendar server and SDK written in Go, with Bitcoin anchoring.
+OpenTimestamps relay API and SDK written in Go.
 
-Stamps document hashes into the Bitcoin blockchain and produces standard
-`.ots` proofs, interoperable with the official
-[OpenTimestamps](https://opentimestamps.org) Python client. Verification is
-trust-minimized: a confirmed proof checks against Bitcoin block headers, not
-against this server's claims.
+Stamps document hashes via **public upstream calendars** (alice.btc, bob.btc, etc.)
+and returns standard `.ots` proofs, interoperable with the official
+[OpenTimestamps](https://opentimestamps.org) Python client. No Bitcoin node
+required to stamp or upgrade — upstream calendars handle anchoring.
 
 ## Quick start
 
 Requires [Go 1.26+](https://go.dev/) and [just](https://github.com/casey/just).
 
 ```bash
-just run            # in-memory dev server, no Bitcoin
+just run            # relay on :14788, default public calendars
 ```
 
 - API: `http://127.0.0.1:14788`
 - Swagger UI: `http://127.0.0.1:14788/swagger/index.html`
 
-With Bitcoin anchoring on a disposable regtest chain (requires Docker):
+With Docker (no Bitcoin node):
 
 ```bash
-just regtest-up     # bitcoind regtest + funded wallet
-just run-regtest    # server with 5s anchoring, 1 confirmation
-just regtest-mine   # confirm pending anchors
+docker compose up -d
 ```
 
 ## Tasks
 
 ```bash
 just                # list recipes
-just run            # dev server (in-memory)
-just run-persistent # server with data dir ~/.otsd/calendar
+just run            # relay API (public upstream calendars)
+just run-calendars "https://alice.btc.calendar.opentimestamps.org"  # custom upstreams
+just build          # relay binary → bin/ots-server
+just build-calendar # self-hosted calendar binary → bin/ots-calendar
 just test           # unit + e2e tests
-just test-all       # incl. regtest integration (needs regtest-up)
-just cross-validate # wire-format check against python-opentimestamps
+just calendar-run   # self-hosted calendar (dev, in-memory)
 just swagger        # regenerate OpenAPI docs
 just check          # tidy + swagger + test
 ```
@@ -43,22 +41,23 @@ just check          # tidy + swagger + test
 ## How it works
 
 ```
-client digest ──► aggregator (1s merkle batch) ──► calendar commitment
-                                                    │  (journal + bbolt, fsync)
-                                                    ▼
-                                            Bitcoin stamper
-                                     batches commitments ──► OP_RETURN tx
-                                                    │
-                                     after N confirmations:
-                                     block merkle proof + attestation
-                                                    ▼
-                          .ots proof: digest ─ops─► Bitcoin block merkle root
+client digest ──► relay API ──► upstream calendars (parallel)
+                                      │
+                                      ▼
+                              pending .ots proof (merged)
+                                      │
+                         poll upgrade until complete
+                                      ▼
+                    confirmed .ots (Bitcoin attestation)
 ```
 
-A proof starts **pending** (calendar receipt) and becomes **confirmed** once
-its anchor transaction is buried under `--btc-min-confirmations` blocks. Only
-confirmed proofs verify as `valid`. See
-[docs/COMPLIANCE.md](docs/COMPLIANCE.md) for what each stage proves and the
+The relay fans out each stamp to multiple public calendars and merges the
+returned proofs. Upgrade resolves pending attestations against the correct
+upstream calendar (by URI embedded in each attestation). Verification of
+confirmed proofs requires a Bitcoin header source (`-btc-rpc-*` or your own
+node via the SDK).
+
+See [docs/COMPLIANCE.md](docs/COMPLIANCE.md) for proof semantics and the
 threat model.
 
 ## API
@@ -76,11 +75,11 @@ threat model.
 |--------|------|-------------|
 | `POST` | `/api/v1/timestamps` | Create timestamp from hex digest |
 | `POST` | `/api/v1/upgrade` | Resolve pending attestations, return upgraded proof |
-| `POST` | `/api/v1/verify` | Verify digest + proof against Bitcoin headers |
+| `POST` | `/api/v1/verify` | Verify digest + proof (needs `-btc-rpc-*` for `valid=true`) |
 | `POST` | `/api/v1/stamp-file` | Multipart file upload → detached `.ots` proof |
 | `POST` | `/api/v1/verify-file` | Multipart file + `.ots` → verification result |
-| `GET` | `/api/v1/status` | Pending count, unconfirmed txs, wallet balance, height |
-| `GET` | `/api/v1/health` | Health incl. Bitcoin RPC reachability |
+| `GET` | `/api/v1/status` | Upstream calendar reachability |
+| `GET` | `/api/v1/health` | Health incl. upstream calendar status |
 
 ### Verify response
 
@@ -106,20 +105,14 @@ checked against a block header (fail closed).
 Typical compliance flow:
 
 1. **Stamp**: `POST /api/v1/stamp-file` (or hash locally and `POST /digest`).
-   Store the returned `.ots` bytes next to your document. The server keeps
-   only the hash.
+   Store the returned `.ots` bytes next to your document.
 2. **Poll**: `POST /api/v1/upgrade` with the proof until `"complete": true`.
-   Recommended interval: **30–60 minutes**. Anchoring batches every
-   `--btc-min-tx-interval` (default 6h) and needs 6 confirmations (~1h), so
-   expect **up to ~8 hours** on defaults; faster polling buys nothing.
-   Persist the upgraded proof — it now verifies offline, forever.
-3. **Verify**: `POST /api/v1/verify-file` (or verify independently — see
-   [docs/COMPLIANCE.md](docs/COMPLIANCE.md)). Treat `"valid": false` with
-   `"status": "pending"` as *not yet evidence*, and `"invalid"` as an alarm.
-
-Error handling: the native `GET /timestamp/{hex}` returns 404 with body
-`"Pending confirmation in Bitcoin blockchain"` while anchoring is in
-progress, and `"Commitment not found"` for unknown digests.
+   Recommended interval: **30–60 minutes**. Upstream calendars anchor on
+   their own schedule; expect **several hours** on mainnet.
+   Persist the upgraded proof — it verifies offline, forever.
+3. **Verify**: independently with your own Bitcoin node — see
+   [docs/COMPLIANCE.md](docs/COMPLIANCE.md). Treat `"valid": false` with
+   `"status": "pending"` as *not yet evidence*.
 
 ### SDK
 
@@ -138,9 +131,8 @@ import (
 
 func main() {
     ctx := context.Background()
-    client := ots.NewClient("http://127.0.0.1:14788")
+    client := ots.NewClient("https://alice.btc.calendar.opentimestamps.org")
 
-    // Stamp a file → detached .ots proof
     f, _ := os.Open("contract.pdf")
     det, err := ots.StampFile(ctx, client, f)
     f.Close()
@@ -150,93 +142,78 @@ func main() {
     proofBytes, _ := det.SerializeBytes()
     os.WriteFile("contract.pdf.ots", proofBytes, 0o644)
 
-    // Block until the proof is Bitcoin-confirmed (bound it with a timeout)
     waitCtx, cancel := context.WithTimeout(ctx, 12*time.Hour)
     defer cancel()
     if err := ots.UpgradeUntilConfirmed(waitCtx, client, det.Timestamp, time.Minute); err != nil {
         log.Fatal(err)
     }
 
-    // Verify against your own Bitcoin node — no trust in the calendar
     headers, _ := ots.BitcoinRPCHeaderSource("127.0.0.1:8332", "user", "pass", "mainnet")
     result, _ := ots.VerifyFile(ctx, client, headers, "contract.pdf", "contract.pdf.ots")
     fmt.Printf("valid=%v at %s (block %d)\n", result.Valid, result.VerifiedAt, result.BlockHeight)
 }
 ```
 
-## Production deployment
+Or use the relay HTTP API directly — no SDK required.
+
+## Deployment
 
 ```bash
-BTC_RPC_PASS=change-me OTS_CALENDAR_URI=https://cal.example.com docker compose up -d
+docker compose up -d
 ```
 
-The compose file runs a pruned Bitcoin Core node on an internal network — the
-RPC port is never exposed. Put a TLS reverse proxy in front of port 14788.
-
-Server flags:
+Relay server flags:
 
 ```
--addr                    listen address (default :14788)
--calendar-uri            public URI embedded in proofs (persisted on first boot)
--data-dir                calendar state (default ~/.otsd/calendar; "memory" for dev)
--log-json                structured JSON logs
--btc-rpc-host/user/pass  Bitcoin Core RPC (host empty = stamper disabled)
--btc-network             mainnet | testnet | regtest (checked against the node)
--btc-min-confirmations   default 6
--btc-min-tx-interval     anchor batching interval, default 6h
--btc-max-fee             max anchor tx fee in BTC, default 0.001
--max-pending             stamper pool bound, default 100000
+-addr                listen address (default :14788)
+-calendars           comma-separated upstream URLs (default: public mainnet calendars)
+-calendar-timeout    per-upstream HTTP timeout (default 30s)
+-log-json             structured JSON logs
+-btc-rpc-host/user/pass/network   optional; enables confirmed verify on /api/v1/verify
 ```
 
-Operational notes:
+Environment:
 
-- **Backup** = the data dir: `journal`, `db/`, `hmac-key`, `uri`. See
-  [docs/COMPLIANCE.md](docs/COMPLIANCE.md#backup-and-restore).
-- **Wallet**: keep a small fee balance; `GET /api/v1/status` reports it.
-- **Restarts** are safe at any point: the journal is fsync'd before any
-  response is returned, and the stamper re-queues unanchored commitments on
-  boot. Reorged/conflicted anchor transactions are re-queued automatically.
-- **Network isolation**: the server aborts on startup if the node's chain
-  does not match `-btc-network`, preventing testnet proofs from a mainnet
-  calendar.
+| Variable | Purpose |
+|----------|---------|
+| `OTS_CALENDARS` | Comma-separated upstream calendar URLs |
+
+Default upstream calendars:
+
+- `https://alice.btc.calendar.opentimestamps.org`
+- `https://bob.btc.calendar.opentimestamps.org`
+- `https://finney.calendar.eternitywall.com`
+
+Put a TLS reverse proxy in front of port 14788 for public exposure.
+
+## Self-hosted calendar (optional)
+
+The original calendar server with Bitcoin anchoring is still available for
+operators who want to run their own calendar:
+
+```bash
+just build-calendar
+just calendar-run-persistent   # or deploy/calendar/docker-compose.yml
+```
+
+See [deploy/calendar/docker-compose.yml](deploy/calendar/docker-compose.yml).
 
 ## Architecture
 
 ```
-cmd/server          HTTP server (stdlib net/http + swaggo)
-api/server          Route handlers (native OTS + JSON + file API)
+cmd/server          Relay HTTP API (default)
+cmd/calendar        Self-hosted calendar server (optional)
+api/server          Relay route handlers
+api/calendarserver  Calendar server handlers (optional binary)
 internal/core       OTS protocol (serialize, ops, attestations, timestamps)
-internal/calendar   Aggregator, journal, bbolt store, data dir
-internal/stamper    Bitcoin OP_RETURN anchoring + confirmation tracking
+internal/calendar   Calendar server internals
+internal/stamper    Bitcoin OP_RETURN anchoring
 internal/bitcoin    Bitcoin Core RPC, block proofs, header source
 internal/verify     Fail-closed proof verification
-pkg/ots             Public SDK (stamp, upgrade, verify)
+pkg/ots             Public SDK + multi-calendar Pool client
 ```
-
-Cross-client compatibility is exercised in CI-style tests: real mainnet
-proof vectors from `opentimestamps-client` verify in Go, and
-`scripts/cross-validate.sh` round-trips proofs with the Python client.
 
 ## License
 
 Licensed under the [GNU Lesser General Public License v3.0 or later](LICENSE)
-(LGPL-3.0+).
-
-This matches the license of the upstream OpenTimestamps reference
-implementations from which portions of this project are derived. See
-[NOTICE](NOTICE) for attribution details.
-
-### Source file headers
-
-Files ported from upstream should include a header like:
-
-```
-// Copyright (C) 2025 Thales Meier
-//
-// This file is part of OTS.
-//
-// It is subject to the license terms in the LICENSE file found in the top-level
-// directory of this distribution.
-//
-// Portions derived from <upstream-repo>/<path> (LGPL-3.0+).
-```
+(LGPL-3.0+). See [NOTICE](NOTICE) for upstream attribution.

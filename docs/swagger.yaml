@@ -12,6 +12,15 @@ definitions:
       status:
         type: string
     type: object
+  api_server.CalendarStatus:
+    properties:
+      detail:
+        type: string
+      reachable:
+        type: boolean
+      url:
+        type: string
+    type: object
   api_server.CreateTimestampRequest:
     properties:
       digest:
@@ -32,33 +41,25 @@ definitions:
     type: object
   api_server.HealthResponse:
     properties:
-      bitcoin:
-        example: ok
-        type: string
+      calendars:
+        items:
+          $ref: '#/definitions/api_server.CalendarStatus'
+        type: array
       status:
         example: ok
         type: string
     type: object
   api_server.StatusResponse:
     properties:
-      best_block_height:
-        type: integer
-      bitcoin_network:
+      bitcoin_verify:
+        example: enabled
         type: string
-      calendar_uri:
-        type: string
-      last_tx_time:
-        type: string
-      pending_commitments:
-        type: integer
-      stamper_enabled:
-        type: boolean
-      unconfirmed_txs:
-        type: integer
+      calendars:
+        items:
+          $ref: '#/definitions/api_server.CalendarStatus'
+        type: array
       version:
         type: string
-      wallet_balance_btc:
-        type: number
     type: object
   api_server.UpgradeRequest:
     properties:
@@ -112,18 +113,18 @@ info:
   contact:
     name: OTS
     url: https://github.com/thalestmm/ots
-  description: OpenTimestamps calendar server and SDK (Go), with Bitcoin anchoring.
+  description: 'OpenTimestamps relay API: stamps and upgrades proofs via public upstream
+    calendars.'
   license:
     name: LGPL-3.0
     url: https://www.gnu.org/licenses/lgpl-3.0.html
   termsOfService: https://github.com/thalestmm/ots
-  title: OTS API
-  version: 0.2.0
+  title: OTS Relay API
+  version: 0.3.0
 paths:
   /api/v1/health:
     get:
-      description: Reports server health; when the stamper is enabled, also checks
-        Bitcoin RPC reachability.
+      description: Reports relay health and upstream calendar reachability.
       produces:
       - application/json
       responses:
@@ -143,8 +144,8 @@ paths:
       consumes:
       - multipart/form-data
       description: Multipart upload (field "file"). The file is hashed server-side
-        with SHA-256 and submitted to the calendar. Returns a standard detached .ots
-        proof as bytes. Only the hash is retained.
+        with SHA-256 and submitted to upstream calendars. Returns a standard detached
+        .ots proof as bytes.
       parameters:
       - description: File to timestamp
         in: formData
@@ -162,8 +163,8 @@ paths:
           description: Bad Request
           schema:
             $ref: '#/definitions/api_server.ErrorResponse'
-        "500":
-          description: Internal Server Error
+        "502":
+          description: Bad Gateway
           schema:
             $ref: '#/definitions/api_server.ErrorResponse'
       summary: Stamp a file
@@ -171,8 +172,8 @@ paths:
       - files
   /api/v1/status:
     get:
-      description: 'Operational snapshot: pending commitments, unconfirmed anchor
-        transactions, wallet balance, best block height.'
+      description: 'Operational snapshot: configured upstream calendars and optional
+        Bitcoin verify backend.'
       produces:
       - application/json
       responses:
@@ -180,7 +181,7 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/api_server.StatusResponse'
-      summary: Calendar and stamper status
+      summary: Relay status
       tags:
       - system
   /api/v1/timestamps:
@@ -207,8 +208,8 @@ paths:
           description: Bad Request
           schema:
             $ref: '#/definitions/api_server.ErrorResponse'
-        "500":
-          description: Internal Server Error
+        "502":
+          description: Bad Gateway
           schema:
             $ref: '#/definitions/api_server.ErrorResponse'
       summary: Create timestamp (JSON)
@@ -218,7 +219,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: Resolves pending attestations against this calendar and returns
+      description: Resolves pending attestations against upstream calendars and returns
         the (possibly) upgraded proof. complete=true once a Bitcoin attestation is
         present.
       parameters:
@@ -247,8 +248,8 @@ paths:
       consumes:
       - application/json
       description: Verifies digest binding, resolves pending attestations against
-        this calendar, and checks Bitcoin attestations against block headers. valid=true
-        only for cryptographically confirmed proofs.
+        upstream calendars, and checks Bitcoin attestations when a Bitcoin header
+        source is configured. valid=true only for cryptographically confirmed proofs.
       parameters:
       - description: Digest and proof
         in: body
@@ -306,7 +307,7 @@ paths:
       consumes:
       - application/octet-stream
       description: OpenTimestamps-native endpoint. Body is raw digest bytes (max 64).
-        Returns serialized timestamp proof.
+        Returns serialized timestamp proof from upstream calendars.
       parameters:
       - description: Raw digest bytes
         in: body
@@ -331,8 +332,7 @@ paths:
   /timestamp/{commitment}:
     get:
       description: OpenTimestamps-native upgrade endpoint. Commitment is hex-encoded
-        bytes. The 404 body distinguishes commitments awaiting Bitcoin confirmation
-        from unknown ones.
+        bytes. Queries all upstream calendars in parallel.
       parameters:
       - description: Hex-encoded commitment
         in: path
@@ -351,7 +351,7 @@ paths:
           schema:
             type: string
         "404":
-          description: Pending or not found
+          description: Not found on any calendar
           schema:
             type: string
       summary: Get upgraded timestamp proof

@@ -33,7 +33,7 @@ const docTemplate = `{
     "paths": {
         "/api/v1/health": {
             "get": {
-                "description": "Reports server health; when the stamper is enabled, also checks Bitcoin RPC reachability.",
+                "description": "Reports relay health and upstream calendar reachability.",
                 "produces": [
                     "application/json"
                 ],
@@ -59,7 +59,7 @@ const docTemplate = `{
         },
         "/api/v1/stamp-file": {
             "post": {
-                "description": "Multipart upload (field \"file\"). The file is hashed server-side with SHA-256 and submitted to the calendar. Returns a standard detached .ots proof as bytes. Only the hash is retained.",
+                "description": "Multipart upload (field \"file\"). The file is hashed server-side with SHA-256 and submitted to upstream calendars. Returns a standard detached .ots proof as bytes.",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -92,8 +92,8 @@ const docTemplate = `{
                             "$ref": "#/definitions/api_server.ErrorResponse"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/api_server.ErrorResponse"
                         }
@@ -103,14 +103,14 @@ const docTemplate = `{
         },
         "/api/v1/status": {
             "get": {
-                "description": "Operational snapshot: pending commitments, unconfirmed anchor transactions, wallet balance, best block height.",
+                "description": "Operational snapshot: configured upstream calendars and optional Bitcoin verify backend.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "system"
                 ],
-                "summary": "Calendar and stamper status",
+                "summary": "Relay status",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -158,8 +158,8 @@ const docTemplate = `{
                             "$ref": "#/definitions/api_server.ErrorResponse"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/api_server.ErrorResponse"
                         }
@@ -169,7 +169,7 @@ const docTemplate = `{
         },
         "/api/v1/upgrade": {
             "post": {
-                "description": "Resolves pending attestations against this calendar and returns the (possibly) upgraded proof. complete=true once a Bitcoin attestation is present.",
+                "description": "Resolves pending attestations against upstream calendars and returns the (possibly) upgraded proof. complete=true once a Bitcoin attestation is present.",
                 "consumes": [
                     "application/json"
                 ],
@@ -209,7 +209,7 @@ const docTemplate = `{
         },
         "/api/v1/verify": {
             "post": {
-                "description": "Verifies digest binding, resolves pending attestations against this calendar, and checks Bitcoin attestations against block headers. valid=true only for cryptographically confirmed proofs.",
+                "description": "Verifies digest binding, resolves pending attestations against upstream calendars, and checks Bitcoin attestations when a Bitcoin header source is configured. valid=true only for cryptographically confirmed proofs.",
                 "consumes": [
                     "application/json"
                 ],
@@ -294,7 +294,7 @@ const docTemplate = `{
         },
         "/digest": {
             "post": {
-                "description": "OpenTimestamps-native endpoint. Body is raw digest bytes (max 64). Returns serialized timestamp proof.",
+                "description": "OpenTimestamps-native endpoint. Body is raw digest bytes (max 64). Returns serialized timestamp proof from upstream calendars.",
                 "consumes": [
                     "application/octet-stream"
                 ],
@@ -334,7 +334,7 @@ const docTemplate = `{
         },
         "/timestamp/{commitment}": {
             "get": {
-                "description": "OpenTimestamps-native upgrade endpoint. Commitment is hex-encoded bytes. The 404 body distinguishes commitments awaiting Bitcoin confirmation from unknown ones.",
+                "description": "OpenTimestamps-native upgrade endpoint. Commitment is hex-encoded bytes. Queries all upstream calendars in parallel.",
                 "produces": [
                     "application/octet-stream"
                 ],
@@ -365,7 +365,7 @@ const docTemplate = `{
                         }
                     },
                     "404": {
-                        "description": "Pending or not found",
+                        "description": "Not found on any calendar",
                         "schema": {
                             "type": "string"
                         }
@@ -385,6 +385,20 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "api_server.CalendarStatus": {
+            "type": "object",
+            "properties": {
+                "detail": {
+                    "type": "string"
+                },
+                "reachable": {
+                    "type": "boolean"
+                },
+                "url": {
                     "type": "string"
                 }
             }
@@ -420,9 +434,11 @@ const docTemplate = `{
         "api_server.HealthResponse": {
             "type": "object",
             "properties": {
-                "bitcoin": {
-                    "type": "string",
-                    "example": "ok"
+                "calendars": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api_server.CalendarStatus"
+                    }
                 },
                 "status": {
                     "type": "string",
@@ -433,32 +449,18 @@ const docTemplate = `{
         "api_server.StatusResponse": {
             "type": "object",
             "properties": {
-                "best_block_height": {
-                    "type": "integer"
+                "bitcoin_verify": {
+                    "type": "string",
+                    "example": "enabled"
                 },
-                "bitcoin_network": {
-                    "type": "string"
-                },
-                "calendar_uri": {
-                    "type": "string"
-                },
-                "last_tx_time": {
-                    "type": "string"
-                },
-                "pending_commitments": {
-                    "type": "integer"
-                },
-                "stamper_enabled": {
-                    "type": "boolean"
-                },
-                "unconfirmed_txs": {
-                    "type": "integer"
+                "calendars": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api_server.CalendarStatus"
+                    }
                 },
                 "version": {
                     "type": "string"
-                },
-                "wallet_balance_btc": {
-                    "type": "number"
                 }
             }
         },
@@ -537,12 +539,12 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "0.2.0",
+	Version:          "0.3.0",
 	Host:             "localhost:14788",
 	BasePath:         "/",
 	Schemes:          []string{},
-	Title:            "OTS API",
-	Description:      "OpenTimestamps calendar server and SDK (Go), with Bitcoin anchoring.",
+	Title:            "OTS Relay API",
+	Description:      "OpenTimestamps relay API: stamps and upgrades proofs via public upstream calendars.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

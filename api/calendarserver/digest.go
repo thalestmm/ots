@@ -2,7 +2,7 @@
 //
 // This file is part of OTS.
 
-package server
+package calendarserver
 
 import (
 	"encoding/hex"
@@ -12,15 +12,6 @@ import (
 )
 
 // postDigest godoc
-// @Summary      Submit digest for timestamping
-// @Description  OpenTimestamps-native endpoint. Body is raw digest bytes (max 64). Returns serialized timestamp proof from upstream calendars.
-// @Tags         timestamps
-// @Accept       application/octet-stream
-// @Produce      application/octet-stream
-// @Param        digest  body  string  true  "Raw digest bytes"
-// @Success      200  {string}  string  "Serialized OTS timestamp"
-// @Failure      400  {string}  string  "Invalid request"
-// @Router       /digest [post]
 func (h *Handler) postDigest(w http.ResponseWriter, r *http.Request) {
 	h.setOTSHeaders(w)
 	if r.ContentLength < 0 {
@@ -37,9 +28,9 @@ func (h *Handler) postDigest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ts, err := h.backend.Stamp(r.Context(), body)
+	ts, err := h.aggregator.Submit(r.Context(), body)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	data, err := ts.SerializeBytes()
@@ -53,16 +44,6 @@ func (h *Handler) postDigest(w http.ResponseWriter, r *http.Request) {
 }
 
 // postCreateJSON godoc
-// @Summary      Create timestamp (JSON)
-// @Description  Convenience JSON wrapper around digest submission. Digest must be hex-encoded SHA-256 (32 bytes).
-// @Tags         timestamps
-// @Accept       json
-// @Produce      json
-// @Param        request  body  CreateTimestampRequest  true  "Digest to timestamp"
-// @Success      200  {object}  CreateTimestampResponse
-// @Failure      400  {object}  ErrorResponse
-// @Failure      502  {object}  ErrorResponse
-// @Router       /api/v1/timestamps [post]
 func (h *Handler) postCreateJSON(w http.ResponseWriter, r *http.Request) {
 	var req CreateTimestampRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -79,9 +60,9 @@ func (h *Handler) postCreateJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ts, err := h.backend.Stamp(r.Context(), digest)
+	ts, err := h.aggregator.Submit(r.Context(), digest)
 	if err != nil {
-		writeJSONError(w, http.StatusBadGateway, err.Error())
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	proof, err := ts.SerializeBytes()

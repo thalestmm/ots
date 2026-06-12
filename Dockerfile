@@ -9,6 +9,5 @@ FROM alpine:3.21
 RUN addgroup -S ots && adduser -S ots -G ots
 COPY --from=build /ots-server /usr/local/bin/ots-server
 USER ots
-VOLUME /data
 EXPOSE 14788
-ENTRYPOINT ["ots-server", "-data-dir", "/data"]
+ENTRYPOINT ["ots-server"]

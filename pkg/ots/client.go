@@ -67,7 +67,7 @@ func (c *Client) Submit(ctx context.Context, digest []byte) (*timestamp.Timestam
 	return timestamp.DeserializeBytes(body, digest)
 }
 
-func (c *Client) GetTimestamp(ctx context.Context, commitment []byte) (*timestamp.Timestamp, error) {
+func (c *Client) GetTimestamp(ctx context.Context, _ string, commitment []byte) (*timestamp.Timestamp, error) {
 	url := fmt.Sprintf("%s/timestamp/%x", c.baseURL, commitment)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

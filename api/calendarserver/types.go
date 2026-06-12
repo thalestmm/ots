@@ -2,7 +2,7 @@
 //
 // This file is part of OTS.
 
-package server
+package calendarserver
 
 type CreateTimestampRequest struct {
 	Digest string `json:"digest" example:"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"`
@@ -45,21 +45,21 @@ type UpgradeResponse struct {
 	Complete bool   `json:"complete"`
 }
 
-type CalendarStatus struct {
-	URL       string `json:"url"`
-	Reachable bool   `json:"reachable"`
-	Detail    string `json:"detail,omitempty"`
-}
-
 type StatusResponse struct {
-	Version       string           `json:"version"`
-	Calendars     []CalendarStatus `json:"calendars"`
-	BitcoinVerify string           `json:"bitcoin_verify,omitempty" example:"enabled"`
+	Version            string  `json:"version"`
+	CalendarURI        string  `json:"calendar_uri"`
+	StamperEnabled     bool    `json:"stamper_enabled"`
+	PendingCommitments int     `json:"pending_commitments"`
+	UnconfirmedTxs     int     `json:"unconfirmed_txs"`
+	LastTxTime         string  `json:"last_tx_time,omitempty"`
+	BestBlockHeight    int64   `json:"best_block_height,omitempty"`
+	WalletBalanceBTC   float64 `json:"wallet_balance_btc,omitempty"`
+	BitcoinNetwork     string  `json:"bitcoin_network,omitempty"`
 }
 
 type HealthResponse struct {
-	Status    string           `json:"status" example:"ok"`
-	Calendars []CalendarStatus `json:"calendars"`
+	Status  string `json:"status" example:"ok"`
+	Bitcoin string `json:"bitcoin,omitempty" example:"ok"`
 }
 
 type ErrorResponse struct {

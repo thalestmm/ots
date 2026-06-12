@@ -243,6 +243,6 @@ type storeUpgrader struct {
 	store calendar.Storage
 }
 
-func (u storeUpgrader) GetTimestamp(ctx context.Context, commitment []byte) (*timestamp.Timestamp, error) {
+func (u storeUpgrader) GetTimestamp(ctx context.Context, _ string, commitment []byte) (*timestamp.Timestamp, error) {
 	return u.store.Get(commitment)
 }

@@ -2,9 +2,10 @@
 //
 // This file is part of OTS.
 
-package server
+package calendarserver
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -14,8 +15,16 @@ import (
 	"github.com/thalestmm/ots/internal/verify"
 )
 
+type calendarUpgrader struct {
+	h *Handler
+}
+
+func (u calendarUpgrader) GetTimestamp(ctx context.Context, _ string, commitment []byte) (*timestamp.Timestamp, error) {
+	return u.h.calendar.Get(commitment)
+}
+
 func (h *Handler) verifyOptions() verify.Options {
-	return verify.Options{Upgrader: h.backend, Headers: h.headers}
+	return verify.Options{Upgrader: calendarUpgrader{h: h}, Headers: h.headers}
 }
 
 func verifyResponseFrom(result *verify.Result) VerifyResponse {
@@ -38,15 +47,6 @@ func verifyResponseFrom(result *verify.Result) VerifyResponse {
 }
 
 // postVerifyJSON godoc
-// @Summary      Verify timestamp proof
-// @Description  Verifies digest binding, resolves pending attestations against upstream calendars, and checks Bitcoin attestations when a Bitcoin header source is configured. valid=true only for cryptographically confirmed proofs.
-// @Tags         timestamps
-// @Accept       json
-// @Produce      json
-// @Param        request  body  VerifyRequest  true  "Digest and proof"
-// @Success      200  {object}  VerifyResponse
-// @Failure      400  {object}  ErrorResponse
-// @Router       /api/v1/verify [post]
 func (h *Handler) postVerifyJSON(w http.ResponseWriter, r *http.Request) {
 	var req VerifyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -78,15 +78,6 @@ func (h *Handler) postVerifyJSON(w http.ResponseWriter, r *http.Request) {
 }
 
 // postUpgradeJSON godoc
-// @Summary      Upgrade timestamp proof
-// @Description  Resolves pending attestations against upstream calendars and returns the (possibly) upgraded proof. complete=true once a Bitcoin attestation is present.
-// @Tags         timestamps
-// @Accept       json
-// @Produce      json
-// @Param        request  body  UpgradeRequest  true  "Digest and proof"
-// @Success      200  {object}  UpgradeResponse
-// @Failure      400  {object}  ErrorResponse
-// @Router       /api/v1/upgrade [post]
 func (h *Handler) postUpgradeJSON(w http.ResponseWriter, r *http.Request) {
 	var req UpgradeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -109,7 +100,7 @@ func (h *Handler) postUpgradeJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	upgraded, err := h.backend.Upgrade(r.Context(), ts)
+	upgraded, err := verify.Upgrade(r.Context(), calendarUpgrader{h: h}, ts)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return

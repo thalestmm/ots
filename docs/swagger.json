@@ -9,8 +9,8 @@
     ],
     "swagger": "2.0",
     "info": {
-        "description": "OpenTimestamps calendar server and SDK (Go), with Bitcoin anchoring.",
-        "title": "OTS API",
+        "description": "OpenTimestamps relay API: stamps and upgrades proofs via public upstream calendars.",
+        "title": "OTS Relay API",
         "termsOfService": "https://github.com/thalestmm/ots",
         "contact": {
             "name": "OTS",
@@ -20,14 +20,14 @@
             "name": "LGPL-3.0",
             "url": "https://www.gnu.org/licenses/lgpl-3.0.html"
         },
-        "version": "0.2.0"
+        "version": "0.3.0"
     },
     "host": "localhost:14788",
     "basePath": "/",
     "paths": {
         "/api/v1/health": {
             "get": {
-                "description": "Reports server health; when the stamper is enabled, also checks Bitcoin RPC reachability.",
+                "description": "Reports relay health and upstream calendar reachability.",
                 "produces": [
                     "application/json"
                 ],
@@ -53,7 +53,7 @@
         },
         "/api/v1/stamp-file": {
             "post": {
-                "description": "Multipart upload (field \"file\"). The file is hashed server-side with SHA-256 and submitted to the calendar. Returns a standard detached .ots proof as bytes. Only the hash is retained.",
+                "description": "Multipart upload (field \"file\"). The file is hashed server-side with SHA-256 and submitted to upstream calendars. Returns a standard detached .ots proof as bytes.",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -86,8 +86,8 @@
                             "$ref": "#/definitions/api_server.ErrorResponse"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/api_server.ErrorResponse"
                         }
@@ -97,14 +97,14 @@
         },
         "/api/v1/status": {
             "get": {
-                "description": "Operational snapshot: pending commitments, unconfirmed anchor transactions, wallet balance, best block height.",
+                "description": "Operational snapshot: configured upstream calendars and optional Bitcoin verify backend.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "system"
                 ],
-                "summary": "Calendar and stamper status",
+                "summary": "Relay status",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -152,8 +152,8 @@
                             "$ref": "#/definitions/api_server.ErrorResponse"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/api_server.ErrorResponse"
                         }
@@ -163,7 +163,7 @@
         },
         "/api/v1/upgrade": {
             "post": {
-                "description": "Resolves pending attestations against this calendar and returns the (possibly) upgraded proof. complete=true once a Bitcoin attestation is present.",
+                "description": "Resolves pending attestations against upstream calendars and returns the (possibly) upgraded proof. complete=true once a Bitcoin attestation is present.",
                 "consumes": [
                     "application/json"
                 ],
@@ -203,7 +203,7 @@
         },
         "/api/v1/verify": {
             "post": {
-                "description": "Verifies digest binding, resolves pending attestations against this calendar, and checks Bitcoin attestations against block headers. valid=true only for cryptographically confirmed proofs.",
+                "description": "Verifies digest binding, resolves pending attestations against upstream calendars, and checks Bitcoin attestations when a Bitcoin header source is configured. valid=true only for cryptographically confirmed proofs.",
                 "consumes": [
                     "application/json"
                 ],
@@ -288,7 +288,7 @@
         },
         "/digest": {
             "post": {
-                "description": "OpenTimestamps-native endpoint. Body is raw digest bytes (max 64). Returns serialized timestamp proof.",
+                "description": "OpenTimestamps-native endpoint. Body is raw digest bytes (max 64). Returns serialized timestamp proof from upstream calendars.",
                 "consumes": [
                     "application/octet-stream"
                 ],
@@ -328,7 +328,7 @@
         },
         "/timestamp/{commitment}": {
             "get": {
-                "description": "OpenTimestamps-native upgrade endpoint. Commitment is hex-encoded bytes. The 404 body distinguishes commitments awaiting Bitcoin confirmation from unknown ones.",
+                "description": "OpenTimestamps-native upgrade endpoint. Commitment is hex-encoded bytes. Queries all upstream calendars in parallel.",
                 "produces": [
                     "application/octet-stream"
                 ],
@@ -359,7 +359,7 @@
                         }
                     },
                     "404": {
-                        "description": "Pending or not found",
+                        "description": "Not found on any calendar",
                         "schema": {
                             "type": "string"
                         }
@@ -379,6 +379,20 @@
                     "type": "string"
                 },
                 "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "api_server.CalendarStatus": {
+            "type": "object",
+            "properties": {
+                "detail": {
+                    "type": "string"
+                },
+                "reachable": {
+                    "type": "boolean"
+                },
+                "url": {
                     "type": "string"
                 }
             }
@@ -414,9 +428,11 @@
         "api_server.HealthResponse": {
             "type": "object",
             "properties": {
-                "bitcoin": {
-                    "type": "string",
-                    "example": "ok"
+                "calendars": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api_server.CalendarStatus"
+                    }
                 },
                 "status": {
                     "type": "string",
@@ -427,32 +443,18 @@
         "api_server.StatusResponse": {
             "type": "object",
             "properties": {
-                "best_block_height": {
-                    "type": "integer"
+                "bitcoin_verify": {
+                    "type": "string",
+                    "example": "enabled"
                 },
-                "bitcoin_network": {
-                    "type": "string"
-                },
-                "calendar_uri": {
-                    "type": "string"
-                },
-                "last_tx_time": {
-                    "type": "string"
-                },
-                "pending_commitments": {
-                    "type": "integer"
-                },
-                "stamper_enabled": {
-                    "type": "boolean"
-                },
-                "unconfirmed_txs": {
-                    "type": "integer"
+                "calendars": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api_server.CalendarStatus"
+                    }
                 },
                 "version": {
                     "type": "string"
-                },
-                "wallet_balance_btc": {
-                    "type": "number"
                 }
             }
         },

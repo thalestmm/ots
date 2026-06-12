@@ -1,15 +1,17 @@
 // Copyright (C) 2025 Thales Meier
 //
 // This file is part of OTS.
+//
+// Portions derived from opentimestamps/opentimestamps-server/otsserver/rpc.py (LGPL-3.0+).
 
-package server
+package calendarserver
 
 import (
-	"context"
 	"net/http"
 
 	"github.com/thalestmm/ots/internal/bitcoin"
-	"github.com/thalestmm/ots/internal/core/timestamp"
+	"github.com/thalestmm/ots/internal/calendar"
+	"github.com/thalestmm/ots/internal/stamper"
 )
 
 const (
@@ -19,29 +21,29 @@ const (
 	otsAccept       = "application/vnd.opentimestamps.v1"
 )
 
-// Backend stamps and upgrades proofs via upstream OpenTimestamps calendars.
-type Backend interface {
-	Stamp(ctx context.Context, digest []byte) (*timestamp.Timestamp, error)
-	GetTimestamp(ctx context.Context, calendarURI string, commitment []byte) (*timestamp.Timestamp, error)
-	GetTimestampAny(ctx context.Context, commitment []byte) (*timestamp.Timestamp, error)
-	Upgrade(ctx context.Context, ts *timestamp.Timestamp) (bool, error)
-	URLs() []string
-	Ping(ctx context.Context, url string) error
-}
-
 type Handler struct {
-	backend Backend
-	version string
+	aggregator *calendar.Aggregator
+	calendar   *calendar.Service
+	version    string
+
+	// Optional Bitcoin integration; nil when running calendar-only.
 	headers bitcoin.HeaderSource
+	btc     *bitcoin.Client
+	stamper *stamper.Stamper
 }
 
-func NewHandler(backend Backend, version string) *Handler {
-	return &Handler{backend: backend, version: version}
+func NewHandler(aggregator *calendar.Aggregator, cal *calendar.Service, version string) *Handler {
+	return &Handler{aggregator: aggregator, calendar: cal, version: version}
 }
 
-// WithBitcoin enables Bitcoin-backed verification (optional; verify fails closed without it).
-func (h *Handler) WithBitcoin(headers bitcoin.HeaderSource) *Handler {
-	h.headers = headers
+// WithBitcoin enables Bitcoin-backed verification and stamper status
+// reporting. Any argument may be nil.
+func (h *Handler) WithBitcoin(btc *bitcoin.Client, st *stamper.Stamper) *Handler {
+	h.btc = btc
+	if btc != nil {
+		h.headers = btc
+	}
+	h.stamper = st
 	return h
 }
 

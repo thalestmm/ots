@@ -21,7 +21,7 @@ import (
 )
 
 type Upgrader interface {
-	GetTimestamp(ctx context.Context, commitment []byte) (*timestamp.Timestamp, error)
+	GetTimestamp(ctx context.Context, calendarURI string, commitment []byte) (*timestamp.Timestamp, error)
 }
 
 // Options configures verification. Upgrader (optional) resolves pending
@@ -204,10 +204,11 @@ func upgradePending(ctx context.Context, upgrader Upgrader, ts *timestamp.Timest
 func Upgrade(ctx context.Context, upgrader Upgrader, ts *timestamp.Timestamp) (bool, error) {
 	before := len(ts.AllAttestations())
 	for _, item := range ts.AllAttestations() {
-		if _, ok := item.Att.(*notary.PendingAttestation); !ok {
+		pending, ok := item.Att.(*notary.PendingAttestation)
+		if !ok {
 			continue
 		}
-		upgraded, err := upgrader.GetTimestamp(ctx, item.Msg)
+		upgraded, err := upgrader.GetTimestamp(ctx, pending.URI, item.Msg)
 		if err != nil {
 			continue
 		}

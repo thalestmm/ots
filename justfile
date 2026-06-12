@@ -3,18 +3,23 @@
 default:
     @just --list
 
-# Run the calendar server locally (in-memory, no Bitcoin)
+# Run the relay API locally (public upstream calendars)
 run:
-    go run ./cmd/server -data-dir memory
-
-# Run with persistence (default data dir ~/.otsd/calendar)
-run-persistent:
     go run ./cmd/server
 
-# Build server binary to bin/ots-server
+# Run relay with custom upstream calendars
+run-calendars urls:
+    go run ./cmd/server -calendars "{{urls}}"
+
+# Build relay server binary to bin/ots-server
 build:
     mkdir -p bin
     go build -o bin/ots-server ./cmd/server
+
+# Build self-hosted calendar server binary
+build-calendar:
+    mkdir -p bin
+    go build -o bin/ots-calendar ./cmd/calendar
 
 # Run all tests
 test:
@@ -41,18 +46,26 @@ regtest-up:
 regtest-down:
     docker rm -f ots-regtest
 
-# Run the server against the regtest node (fast anchoring for development)
-run-regtest:
-    go run ./cmd/server \
+# Run the calendar server against the regtest node (self-hosted calendar mode)
+calendar-run-regtest:
+    go run ./cmd/calendar \
         -btc-rpc-host 127.0.0.1:18443 -btc-rpc-user ots -btc-rpc-pass ots \
         -btc-network regtest -btc-min-confirmations 1 -btc-min-tx-interval 5s \
         -data-dir /tmp/ots-regtest-data
+
+# Run calendar server locally (in-memory, no Bitcoin)
+calendar-run:
+    go run ./cmd/calendar -data-dir memory
+
+# Run calendar server with persistence
+calendar-run-persistent:
+    go run ./cmd/calendar
 
 # Mine n regtest blocks (confirms pending anchors)
 regtest-mine n="1":
     docker exec ots-regtest bitcoin-cli -regtest -rpcuser=ots -rpcpassword=ots -rpcwallet=stamper -generate {{n}}
 
-# Cross-validate wire format against the Python reference client (needs uv + running server on :14788)
+# Cross-validate wire format against the Python reference client (needs uv + running calendar on :14788)
 cross-validate:
     ./scripts/cross-validate.sh
 
@@ -63,9 +76,9 @@ setup-calendar uri data_dir="~/.otsd/calendar":
     @test -f {{data_dir}}/uri || (echo "{{uri}}" > {{data_dir}}/uri && echo "wrote uri")
     @echo "calendar data dir ready: {{data_dir}}"
 
-# Regenerate OpenAPI / Swagger docs
+# Regenerate OpenAPI / Swagger docs (relay API only)
 swagger:
-    go run github.com/swaggo/swag/cmd/swag@latest init -g cmd/server/main.go -o docs --parseDependency --parseInternal
+    go run github.com/swaggo/swag/cmd/swag@latest init -g cmd/server/main.go -o docs --parseDependency --parseInternal --exclude api/calendarserver
 
 # Download and tidy Go module dependencies
 tidy:

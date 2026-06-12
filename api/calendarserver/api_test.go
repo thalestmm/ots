@@ -2,11 +2,10 @@
 //
 // This file is part of OTS.
 
-package server
+package calendarserver
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -18,76 +17,18 @@ import (
 	"time"
 
 	"github.com/thalestmm/ots/internal/calendar"
-	"github.com/thalestmm/ots/internal/core/notary"
 	"github.com/thalestmm/ots/internal/core/timestamp"
-	"github.com/thalestmm/ots/pkg/ots"
 )
 
-func newMockUpstream(t *testing.T) *httptest.Server {
+func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	hmacKey := make([]byte, 32)
 	store := calendar.NewMemoryStore()
+	cal := calendar.NewService("http://cal.example.com", hmacKey, store)
+	agg := calendar.NewAggregator(cal, 10*time.Millisecond)
+	t.Cleanup(agg.Close)
 
-	var cal *calendar.Service
-	var agg *calendar.Aggregator
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /digest", func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(io.LimitReader(r.Body, 64))
-		if len(body) == 0 {
-			http.Error(w, "empty digest", http.StatusBadRequest)
-			return
-		}
-		ts, err := agg.Submit(r.Context(), body)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		data, _ := ts.SerializeBytes()
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(data)
-	})
-	mux.HandleFunc("GET /timestamp/{commitment}", func(w http.ResponseWriter, r *http.Request) {
-		hexCommitment := r.PathValue("commitment")
-		commitment, err := hex.DecodeString(hexCommitment)
-		if err != nil {
-			http.Error(w, "invalid commitment", http.StatusBadRequest)
-			return
-		}
-		ts, err := cal.Get(commitment)
-		if err != nil {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
-		}
-		data, _ := ts.SerializeBytes()
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(data)
-	})
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	srv := httptest.NewServer(mux)
-	cal = calendar.NewService(srv.URL, hmacKey, store)
-	agg = calendar.NewAggregator(cal, 10*time.Millisecond)
-	t.Cleanup(func() {
-		agg.Close()
-		srv.Close()
-	})
-	return srv
-}
-
-func newTestRelay(t *testing.T, upstreams ...*httptest.Server) *httptest.Server {
-	t.Helper()
-	var urls []string
-	for _, u := range upstreams {
-		urls = append(urls, u.URL)
-	}
-	pool, err := ots.NewPool(urls)
-	if err != nil {
-		t.Fatal(err)
-	}
-	h := NewHandler(pool, "test")
+	h := NewHandler(agg, cal, "test")
 	mux := http.NewServeMux()
 	h.Register(mux)
 	srv := httptest.NewServer(mux)
@@ -96,10 +37,10 @@ func newTestRelay(t *testing.T, upstreams ...*httptest.Server) *httptest.Server 
 }
 
 func TestStampThenUpgradeThenVerify(t *testing.T) {
-	upstream := newMockUpstream(t)
-	srv := newTestRelay(t, upstream)
+	srv := newTestServer(t)
 	digest := sha256.Sum256([]byte("compliance evidence"))
 
+	// 1. Stamp via the native endpoint.
 	resp, err := http.Post(srv.URL+"/digest", "application/octet-stream", bytes.NewReader(digest[:]))
 	if err != nil {
 		t.Fatal(err)
@@ -114,6 +55,7 @@ func TestStampThenUpgradeThenVerify(t *testing.T) {
 		t.Fatalf("returned proof invalid: %v", err)
 	}
 
+	// 2. The pending attestation's commitment must be servable.
 	var commitment []byte
 	for _, item := range proof.AllAttestations() {
 		commitment = item.Msg
@@ -121,7 +63,6 @@ func TestStampThenUpgradeThenVerify(t *testing.T) {
 	if commitment == nil {
 		t.Fatal("no attestation in proof")
 	}
-
 	resp, err = http.Get(srv.URL + "/timestamp/" + hex.EncodeToString(commitment))
 	if err != nil {
 		t.Fatal(err)
@@ -132,6 +73,7 @@ func TestStampThenUpgradeThenVerify(t *testing.T) {
 		t.Fatalf("GET /timestamp = %d: %s", resp.StatusCode, body)
 	}
 
+	// 3. Upgrade endpoint round-trips the proof.
 	upgradeReq, _ := json.Marshal(UpgradeRequest{
 		Digest: hex.EncodeToString(digest[:]),
 		Proof:  hex.EncodeToString(proofBytes),
@@ -146,9 +88,10 @@ func TestStampThenUpgradeThenVerify(t *testing.T) {
 	}
 	resp.Body.Close()
 	if upgrade.Complete {
-		t.Fatal("proof complete without Bitcoin anchoring — impossible")
+		t.Fatal("proof complete without a stamper — impossible")
 	}
 
+	// 4. Verify: pending-only proof must fail closed.
 	verifyReq, _ := json.Marshal(VerifyRequest{
 		Digest: hex.EncodeToString(digest[:]),
 		Proof:  upgrade.Proof,
@@ -168,13 +111,16 @@ func TestStampThenUpgradeThenVerify(t *testing.T) {
 	if verifyResp.Status != "pending" {
 		t.Fatalf("status = %q, want pending", verifyResp.Status)
 	}
+	if len(verifyResp.Attestations) == 0 {
+		t.Fatal("no attestations reported")
+	}
 }
 
 func TestStampFileAndVerifyFile(t *testing.T) {
-	upstream := newMockUpstream(t)
-	srv := newTestRelay(t, upstream)
+	srv := newTestServer(t)
 	content := []byte("the quick brown fox signs a contract")
 
+	// Stamp the file.
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	fw, _ := mw.CreateFormFile("file", "contract.pdf")
@@ -198,6 +144,7 @@ func TestStampFileAndVerifyFile(t *testing.T) {
 		t.Fatal(".ots digest does not match file")
 	}
 
+	// Verify the matching file.
 	var buf2 bytes.Buffer
 	mw2 := multipart.NewWriter(&buf2)
 	fw, _ = mw2.CreateFormFile("file", "contract.pdf")
@@ -215,9 +162,10 @@ func TestStampFileAndVerifyFile(t *testing.T) {
 	}
 	resp.Body.Close()
 	if vr.Status != "pending" {
-		t.Fatalf("status = %q, want pending", vr.Status)
+		t.Fatalf("status = %q, want pending (no stamper in test)", vr.Status)
 	}
 
+	// Verify a tampered file: must be rejected outright.
 	var buf3 bytes.Buffer
 	mw3 := multipart.NewWriter(&buf3)
 	fw, _ = mw3.CreateFormFile("file", "contract.pdf")
@@ -239,9 +187,7 @@ func TestStampFileAndVerifyFile(t *testing.T) {
 }
 
 func TestStatusAndHealth(t *testing.T) {
-	upstream := newMockUpstream(t)
-	srv := newTestRelay(t, upstream)
-
+	srv := newTestServer(t)
 	resp, err := http.Get(srv.URL + "/api/v1/status")
 	if err != nil {
 		t.Fatal(err)
@@ -251,7 +197,7 @@ func TestStatusAndHealth(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if len(st.Calendars) != 1 || st.Calendars[0].URL != upstream.URL {
+	if st.CalendarURI != "http://cal.example.com" || st.StamperEnabled {
 		t.Fatalf("unexpected status: %+v", st)
 	}
 
@@ -266,8 +212,7 @@ func TestStatusAndHealth(t *testing.T) {
 }
 
 func TestGetTimestampUnknownCommitment(t *testing.T) {
-	upstream := newMockUpstream(t)
-	srv := newTestRelay(t, upstream)
+	srv := newTestServer(t)
 	resp, err := http.Get(srv.URL + "/timestamp/deadbeef")
 	if err != nil {
 		t.Fatal(err)
@@ -278,49 +223,44 @@ func TestGetTimestampUnknownCommitment(t *testing.T) {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
 	if !bytes.Contains(body, []byte("not found")) {
-		t.Fatalf("404 body = %q", body)
+		t.Fatalf("404 body = %q, want not-found message", body)
 	}
 }
 
-func TestMultiUpstreamStamp(t *testing.T) {
-	upA := newMockUpstream(t)
-	upB := newMockUpstream(t)
-	srv := newTestRelay(t, upA, upB)
-
-	digest := sha256.Sum256([]byte("multi"))
-	resp, err := http.Post(srv.URL+"/digest", "application/octet-stream", bytes.NewReader(digest[:]))
-	if err != nil {
-		t.Fatal(err)
+// Aggregator batches multiple concurrent submissions into one merkle tree;
+// every client must get a serializable proof (regression for the left-branch
+// dead-end bug in CatThenUnaryOp).
+func TestConcurrentSubmissionsShareBatch(t *testing.T) {
+	srv := newTestServer(t)
+	results := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		go func(i int) {
+			digest := sha256.Sum256([]byte{byte(i)})
+			resp, err := http.Post(srv.URL+"/digest", "application/octet-stream", bytes.NewReader(digest[:]))
+			if err != nil {
+				results <- err
+				return
+			}
+			defer resp.Body.Close()
+			body, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != http.StatusOK {
+				results <- &httpError{code: resp.StatusCode, body: string(body)}
+				return
+			}
+			_, err = timestamp.DeserializeBytes(body, digest[:])
+			results <- err
+		}(i)
 	}
-	proofBytes, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("POST /digest = %d", resp.StatusCode)
-	}
-	proof, err := timestamp.DeserializeBytes(proofBytes, digest[:])
-	if err != nil {
-		t.Fatal(err)
-	}
-	pending := 0
-	for _, item := range proof.AllAttestations() {
-		if _, ok := item.Att.(*notary.PendingAttestation); ok {
-			pending++
+	for i := 0; i < 8; i++ {
+		if err := <-results; err != nil {
+			t.Fatal(err)
 		}
 	}
-	if pending != 2 {
-		t.Fatalf("pending attestations = %d, want 2", pending)
-	}
 }
 
-func TestBackendPing(t *testing.T) {
-	upstream := newMockUpstream(t)
-	pool, err := ots.NewPool([]string{upstream.URL})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := pool.Ping(ctx, upstream.URL); err != nil {
-		t.Fatal(err)
-	}
+type httpError struct {
+	code int
+	body string
 }
+
+func (e *httpError) Error() string { return e.body }

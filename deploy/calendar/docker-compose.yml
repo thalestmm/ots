@@ -1,0 +1,53 @@
+# Self-hosted calendar server (optional). For the default relay API, use the
+# root docker-compose.yml instead.
+#
+# Production-shaped deployment: OTS calendar + pruned Bitcoin Core node.
+#
+# First boot:
+#   1. Set BTC_RPC_PASS (and calendar URI) below or via .env
+#   2. docker compose up -d bitcoind   # wait for sync (pruned: ~10 GB)
+#   3. docker compose exec bitcoind bitcoin-cli -rpcuser=ots -rpcpassword=$BTC_RPC_PASS createwallet stamper
+#   4. Fund the wallet (getnewaddress / send BTC for fees)
+#   5. docker compose up -d ots
+#
+# The Bitcoin RPC port is intentionally NOT published to the host: only the
+# ots service reaches it over the internal network. Put a TLS reverse proxy
+# (nginx, caddy) in front of ots:14788 for public exposure.
+
+services:
+  bitcoind:
+    image: bitcoin/bitcoin:28
+    command:
+      - -server=1
+      - -prune=10000
+      - -rpcuser=ots
+      - -rpcpassword=${BTC_RPC_PASS:?set BTC_RPC_PASS}
+      - -rpcbind=0.0.0.0
+      - -rpcallowip=0.0.0.0/0
+    volumes:
+      - bitcoin-data:/home/bitcoin/.bitcoin
+    restart: unless-stopped
+
+  ots:
+    build: .
+    command:
+      - -data-dir=/data
+      - -calendar-uri=${OTS_CALENDAR_URI:-http://127.0.0.1:14788}
+      - -btc-rpc-host=bitcoind:8332
+      - -btc-rpc-user=ots
+      - -btc-rpc-pass=${BTC_RPC_PASS:?set BTC_RPC_PASS}
+      - -btc-network=mainnet
+      - -btc-min-confirmations=6
+      - -btc-min-tx-interval=6h
+      - -log-json
+    ports:
+      - "14788:14788"
+    volumes:
+      - ots-data:/data
+    depends_on:
+      - bitcoind
+    restart: unless-stopped
+
+volumes:
+  bitcoin-data:
+  ots-data:
