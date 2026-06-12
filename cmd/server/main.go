@@ -169,7 +169,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           mux,
+		Handler:           server.RequestLogging(log, mux),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
