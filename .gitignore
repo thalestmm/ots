@@ -1,0 +1,41 @@
+# Build output
+bin/
+dist/
+out/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# Test / coverage
+coverage.txt
+coverage.html
+*.coverprofile
+profile.cov
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Debug / temp
+tmp/
+temp/
+*.log

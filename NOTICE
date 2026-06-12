@@ -1,0 +1,19 @@
+OTS — OpenTimestamps server and SDK (Go)
+Copyright (C) 2025 Thales Meier
+
+This project is derived from the OpenTimestamps reference implementations.
+Upstream portions are Copyright (C) The OpenTimestamps developers.
+
+Upstream sources
+----------------
+
+The following repositories were used as reference and/or source for ports
+in this project. Each is licensed under the GNU Lesser General Public
+License v3 or later (LGPL-3.0+).
+
+  https://github.com/opentimestamps/python-opentimestamps
+  https://github.com/opentimestamps/opentimestamps-server
+  https://github.com/opentimestamps/opentimestamps-client
+
+When copying or porting code, record the upstream file path and commit in the
+corresponding source file header.

@@ -1,0 +1,363 @@
+basePath: /
+consumes:
+- application/json
+- application/octet-stream
+definitions:
+  api_server.AttestationInfoJSON:
+    properties:
+      detail:
+        type: string
+      kind:
+        type: string
+      status:
+        type: string
+    type: object
+  api_server.CreateTimestampRequest:
+    properties:
+      digest:
+        example: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+        type: string
+    type: object
+  api_server.CreateTimestampResponse:
+    properties:
+      commitment:
+        type: string
+      proof:
+        type: string
+    type: object
+  api_server.ErrorResponse:
+    properties:
+      error:
+        type: string
+    type: object
+  api_server.HealthResponse:
+    properties:
+      bitcoin:
+        example: ok
+        type: string
+      status:
+        example: ok
+        type: string
+    type: object
+  api_server.StatusResponse:
+    properties:
+      best_block_height:
+        type: integer
+      bitcoin_network:
+        type: string
+      calendar_uri:
+        type: string
+      last_tx_time:
+        type: string
+      pending_commitments:
+        type: integer
+      stamper_enabled:
+        type: boolean
+      unconfirmed_txs:
+        type: integer
+      version:
+        type: string
+      wallet_balance_btc:
+        type: number
+    type: object
+  api_server.UpgradeRequest:
+    properties:
+      digest:
+        example: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+        type: string
+      proof:
+        type: string
+    type: object
+  api_server.UpgradeResponse:
+    properties:
+      complete:
+        type: boolean
+      proof:
+        type: string
+      upgraded:
+        type: boolean
+    type: object
+  api_server.VerifyRequest:
+    properties:
+      digest:
+        example: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+        type: string
+      proof:
+        type: string
+    type: object
+  api_server.VerifyResponse:
+    properties:
+      attestations:
+        items:
+          $ref: '#/definitions/api_server.AttestationInfoJSON'
+        type: array
+      block_hash:
+        type: string
+      block_height:
+        example: 850000
+        type: integer
+      reason:
+        type: string
+      status:
+        example: confirmed
+        type: string
+      valid:
+        type: boolean
+      verified_at:
+        example: "2026-06-12T14:00:00Z"
+        type: string
+    type: object
+host: localhost:14788
+info:
+  contact:
+    name: OTS
+    url: https://github.com/thalestmm/ots
+  description: OpenTimestamps calendar server and SDK (Go), with Bitcoin anchoring.
+  license:
+    name: LGPL-3.0
+    url: https://www.gnu.org/licenses/lgpl-3.0.html
+  termsOfService: https://github.com/thalestmm/ots
+  title: OTS API
+  version: 0.2.0
+paths:
+  /api/v1/health:
+    get:
+      description: Reports server health; when the stamper is enabled, also checks
+        Bitcoin RPC reachability.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api_server.HealthResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/api_server.HealthResponse'
+      summary: Health check
+      tags:
+      - system
+  /api/v1/stamp-file:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Multipart upload (field "file"). The file is hashed server-side
+        with SHA-256 and submitted to the calendar. Returns a standard detached .ots
+        proof as bytes. Only the hash is retained.
+      parameters:
+      - description: File to timestamp
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: Detached .ots proof bytes
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api_server.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api_server.ErrorResponse'
+      summary: Stamp a file
+      tags:
+      - files
+  /api/v1/status:
+    get:
+      description: 'Operational snapshot: pending commitments, unconfirmed anchor
+        transactions, wallet balance, best block height.'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api_server.StatusResponse'
+      summary: Calendar and stamper status
+      tags:
+      - system
+  /api/v1/timestamps:
+    post:
+      consumes:
+      - application/json
+      description: Convenience JSON wrapper around digest submission. Digest must
+        be hex-encoded SHA-256 (32 bytes).
+      parameters:
+      - description: Digest to timestamp
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api_server.CreateTimestampRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api_server.CreateTimestampResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api_server.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api_server.ErrorResponse'
+      summary: Create timestamp (JSON)
+      tags:
+      - timestamps
+  /api/v1/upgrade:
+    post:
+      consumes:
+      - application/json
+      description: Resolves pending attestations against this calendar and returns
+        the (possibly) upgraded proof. complete=true once a Bitcoin attestation is
+        present.
+      parameters:
+      - description: Digest and proof
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api_server.UpgradeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api_server.UpgradeResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api_server.ErrorResponse'
+      summary: Upgrade timestamp proof
+      tags:
+      - timestamps
+  /api/v1/verify:
+    post:
+      consumes:
+      - application/json
+      description: Verifies digest binding, resolves pending attestations against
+        this calendar, and checks Bitcoin attestations against block headers. valid=true
+        only for cryptographically confirmed proofs.
+      parameters:
+      - description: Digest and proof
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api_server.VerifyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api_server.VerifyResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api_server.ErrorResponse'
+      summary: Verify timestamp proof
+      tags:
+      - timestamps
+  /api/v1/verify-file:
+    post:
+      consumes:
+      - multipart/form-data
+      description: 'Multipart upload: field "file" (original content) and field "ots"
+        (detached proof). Returns the full verification result.'
+      parameters:
+      - description: Original file
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: Detached .ots proof
+        in: formData
+        name: ots
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api_server.VerifyResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api_server.ErrorResponse'
+      summary: Verify a file against its .ots proof
+      tags:
+      - files
+  /digest:
+    post:
+      consumes:
+      - application/octet-stream
+      description: OpenTimestamps-native endpoint. Body is raw digest bytes (max 64).
+        Returns serialized timestamp proof.
+      parameters:
+      - description: Raw digest bytes
+        in: body
+        name: digest
+        required: true
+        schema:
+          type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: Serialized OTS timestamp
+          schema:
+            type: string
+        "400":
+          description: Invalid request
+          schema:
+            type: string
+      summary: Submit digest for timestamping
+      tags:
+      - timestamps
+  /timestamp/{commitment}:
+    get:
+      description: OpenTimestamps-native upgrade endpoint. Commitment is hex-encoded
+        bytes. The 404 body distinguishes commitments awaiting Bitcoin confirmation
+        from unknown ones.
+      parameters:
+      - description: Hex-encoded commitment
+        in: path
+        name: commitment
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: Serialized OTS timestamp
+          schema:
+            type: string
+        "400":
+          description: Invalid commitment
+          schema:
+            type: string
+        "404":
+          description: Pending or not found
+          schema:
+            type: string
+      summary: Get upgraded timestamp proof
+      tags:
+      - timestamps
+produces:
+- application/json
+- application/octet-stream
+swagger: "2.0"
