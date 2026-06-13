@@ -19,6 +19,7 @@ import (
 
 	"github.com/thalestmm/ots/internal/calendar"
 	"github.com/thalestmm/ots/internal/core/notary"
+	"github.com/thalestmm/ots/internal/core/op"
 	"github.com/thalestmm/ots/internal/core/timestamp"
 	"github.com/thalestmm/ots/pkg/ots"
 )
@@ -309,6 +310,79 @@ func TestMultiUpstreamStamp(t *testing.T) {
 	}
 	if pending != 2 {
 		t.Fatalf("pending attestations = %d, want 2", pending)
+	}
+}
+
+func TestParseProofEndpoint(t *testing.T) {
+	upstream := newMockUpstream(t)
+	srv := newTestRelay(t, upstream)
+	digest := sha256.Sum256([]byte("compliance evidence"))
+
+	resp, err := http.Post(srv.URL+"/digest", "application/octet-stream", bytes.NewReader(digest[:]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	proofBytes, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	parseReq, _ := json.Marshal(ParseProofRequest{
+		Digest: hex.EncodeToString(digest[:]),
+		Proof:  hex.EncodeToString(proofBytes),
+	})
+	resp, err = http.Post(srv.URL+"/api/v1/parse-proof", "application/json", bytes.NewReader(parseReq))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parseResp ParseProofResponse
+	if err := json.NewDecoder(resp.Body).Decode(&parseResp); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if parseResp.Complete {
+		t.Fatal("pending proof should not be complete")
+	}
+	if parseResp.BlockHeight != 0 {
+		t.Fatalf("block_height = %d, want 0", parseResp.BlockHeight)
+	}
+	if len(parseResp.PendingCalendars) != 1 {
+		t.Fatalf("pending_calendars = %v", parseResp.PendingCalendars)
+	}
+}
+
+func TestParseProofEndpointConfirmed(t *testing.T) {
+	digest := sha256.Sum256([]byte("confirmed doc"))
+	ts, err := timestamp.New(digest[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := ts.AddOp(op.NewSHA256())
+	if err != nil {
+		t.Fatal(err)
+	}
+	node.Attestations = append(node.Attestations, &notary.BitcoinBlockHeaderAttestation{Height: 850000})
+	proofBytes, err := ts.SerializeBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	upstream := newMockUpstream(t)
+	srv := newTestRelay(t, upstream)
+
+	parseReq, _ := json.Marshal(ParseProofRequest{
+		Digest: hex.EncodeToString(digest[:]),
+		Proof:  hex.EncodeToString(proofBytes),
+	})
+	resp, err := http.Post(srv.URL+"/api/v1/parse-proof", "application/json", bytes.NewReader(parseReq))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parseResp ParseProofResponse
+	if err := json.NewDecoder(resp.Body).Decode(&parseResp); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if !parseResp.Complete || parseResp.BlockHeight != 850000 {
+		t.Fatalf("got %+v, want complete with height 850000", parseResp)
 	}
 }
 

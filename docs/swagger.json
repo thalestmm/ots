@@ -51,6 +51,46 @@
                 }
             }
         },
+        "/api/v1/parse-proof": {
+            "post": {
+                "description": "Extracts embedded attestation metadata (Bitcoin block heights, pending calendars) from a proof without contacting upstream calendars or a Bitcoin node. Does not cryptographically verify the anchor.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "timestamps"
+                ],
+                "summary": "Parse timestamp proof metadata",
+                "parameters": [
+                    {
+                        "description": "Digest and proof",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api_server.ParseProofRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api_server.ParseProofResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/api_server.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/stamp-file": {
             "post": {
                 "description": "Multipart upload (field \"file\"). The file is hashed server-side with SHA-256 and submitted to upstream calendars. Returns a standard detached .ots proof as bytes.",
@@ -437,6 +477,42 @@
                 "status": {
                     "type": "string",
                     "example": "ok"
+                }
+            }
+        },
+        "api_server.ParseProofRequest": {
+            "type": "object",
+            "properties": {
+                "digest": {
+                    "type": "string",
+                    "example": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                },
+                "proof": {
+                    "type": "string"
+                }
+            }
+        },
+        "api_server.ParseProofResponse": {
+            "type": "object",
+            "properties": {
+                "block_height": {
+                    "type": "integer",
+                    "example": 850000
+                },
+                "block_heights": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "complete": {
+                    "type": "boolean"
+                },
+                "pending_calendars": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },

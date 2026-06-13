@@ -45,6 +45,18 @@ type UpgradeResponse struct {
 	Complete bool   `json:"complete"`
 }
 
+type ParseProofRequest struct {
+	Digest string `json:"digest" example:"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"`
+	Proof  string `json:"proof"`
+}
+
+type ParseProofResponse struct {
+	Complete         bool     `json:"complete"`
+	BlockHeight      uint64   `json:"block_height,omitempty" example:"850000"`
+	BlockHeights     []uint64 `json:"block_heights,omitempty"`
+	PendingCalendars []string `json:"pending_calendars,omitempty"`
+}
+
 type CalendarStatus struct {
 	URL       string `json:"url"`
 	Reachable bool   `json:"reachable"`

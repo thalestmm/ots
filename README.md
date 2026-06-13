@@ -75,6 +75,7 @@ threat model.
 |--------|------|-------------|
 | `POST` | `/api/v1/timestamps` | Create timestamp from hex digest |
 | `POST` | `/api/v1/upgrade` | Resolve pending attestations, return upgraded proof |
+| `POST` | `/api/v1/parse-proof` | Extract embedded block height from proof (no Bitcoin node) |
 | `POST` | `/api/v1/verify` | Verify digest + proof (needs `-btc-rpc-*` for `valid=true`) |
 | `POST` | `/api/v1/stamp-file` | Multipart file upload → detached `.ots` proof |
 | `POST` | `/api/v1/verify-file` | Multipart file + `.ots` → verification result |

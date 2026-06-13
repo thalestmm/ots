@@ -51,6 +51,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/timestamps", h.postCreateJSON)
 	mux.HandleFunc("POST /api/v1/verify", h.postVerifyJSON)
 	mux.HandleFunc("POST /api/v1/upgrade", h.postUpgradeJSON)
+	mux.HandleFunc("POST /api/v1/parse-proof", h.postParseProofJSON)
 	mux.HandleFunc("POST /api/v1/stamp-file", h.postStampFile)
 	mux.HandleFunc("POST /api/v1/verify-file", h.postVerifyFile)
 	mux.HandleFunc("GET /api/v1/status", h.getStatus)

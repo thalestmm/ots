@@ -49,6 +49,30 @@ definitions:
         example: ok
         type: string
     type: object
+  api_server.ParseProofRequest:
+    properties:
+      digest:
+        example: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+        type: string
+      proof:
+        type: string
+    type: object
+  api_server.ParseProofResponse:
+    properties:
+      block_height:
+        example: 850000
+        type: integer
+      block_heights:
+        items:
+          type: integer
+        type: array
+      complete:
+        type: boolean
+      pending_calendars:
+        items:
+          type: string
+        type: array
+    type: object
   api_server.StatusResponse:
     properties:
       bitcoin_verify:
@@ -139,6 +163,34 @@ paths:
       summary: Health check
       tags:
       - system
+  /api/v1/parse-proof:
+    post:
+      consumes:
+      - application/json
+      description: Extracts embedded attestation metadata (Bitcoin block heights,
+        pending calendars) from a proof without contacting upstream calendars or a
+        Bitcoin node. Does not cryptographically verify the anchor.
+      parameters:
+      - description: Digest and proof
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api_server.ParseProofRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api_server.ParseProofResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api_server.ErrorResponse'
+      summary: Parse timestamp proof metadata
+      tags:
+      - timestamps
   /api/v1/stamp-file:
     post:
       consumes:
